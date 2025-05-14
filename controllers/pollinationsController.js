@@ -73,6 +73,9 @@ export const generateText = async (req, res) => {
     
     // Store prompt in this scope for error handlers to access
     const userPrompt = prompt;
+    // Store original model for tracking fallbacks
+    const originalModel = model;
+    let actualModel = model;
     
     // Log the request (for debugging)
     console.log('Pollinations Text API Request:', JSON.stringify({
@@ -108,13 +111,39 @@ export const generateText = async (req, res) => {
     }
     
     // Make request to Pollinations.ai API
-    const response = await axios.get(requestUrl, {
-      headers: {
-        'Accept': isAudioRequest ? 'audio/mpeg' : 'application/json'
-      },
-      responseType: isAudioRequest ? 'arraybuffer' : 'json',
-      timeout: 60000 // 60 second timeout
-    });
+    let response;
+    try {
+      response = await axios.get(requestUrl, {
+        headers: {
+          'Accept': isAudioRequest ? 'audio/mpeg' : 'application/json'
+        },
+        responseType: isAudioRequest ? 'arraybuffer' : 'json',
+        timeout: 60000 // 60 second timeout
+      });
+    } catch (apiError) {
+      console.log('Pollinations API Error:', apiError.response?.data || apiError.message);
+      
+      if (model !== 'openai') {
+        console.log('Trying alternative Pollinations endpoint...');
+        // Fall back to OpenAI model if the specified model fails
+        actualModel = 'openai';
+        const fallbackParams = new URLSearchParams({
+          model: 'openai',
+          json: 'true',
+          referrer: 'fortecai.vercel.app',
+          temperature: temperature.toString(),
+          max_tokens: max_tokens.toString()
+        });
+        const fallbackUrl = `https://text.pollinations.ai/${encodedPrompt}?${fallbackParams.toString()}`;
+        response = await axios.get(fallbackUrl, {
+          headers: { 'Accept': 'application/json' },
+          responseType: 'json',
+          timeout: 60000
+        });
+      } else {
+        throw apiError; // Re-throw if already using openai and still failing
+      }
+    }
     
     // Handle audio response
     if (isAudioRequest) {
@@ -151,17 +180,24 @@ export const generateText = async (req, res) => {
     // Extract the model information to return to the client
     console.log('Full jsonResponse:', JSON.stringify(jsonResponse));
     
+    // Handle fallbacks and provide clear information about the model actually used
+    const wasModelFallback = originalModel !== actualModel;
+    const displayModelName = jsonResponse.model_name || jsonResponse.model || actualModel;
+    
     // Return the formatted response with all possible model information
     return res.status(200).json({
       status: 'success',
       requestId: uuidv4(),
       data: {
-        text: jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse,
-        model: model,
+        text: wasModelFallback 
+          ? { response: jsonResponse.text || jsonResponse.content || jsonResponse.response || 'Response generated', model_name: `${displayModelName} (fallback from ${originalModel})` }
+          : jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse,
+        model: actualModel,
+        requested_model: originalModel,
         tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
         temperature: temperature,
         // Include any model information from the response
-        model_name: jsonResponse.model_name || jsonResponse.model || model
+        model_name: wasModelFallback ? `${displayModelName} (fallback from ${originalModel})` : (displayModelName)
       }
     });
   } catch (error) {
