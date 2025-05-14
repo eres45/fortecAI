@@ -160,13 +160,13 @@ export const generateText = async (req, res) => {
     // Extract the model information to return to the client
     console.log('Full jsonResponse:', JSON.stringify(jsonResponse));
     
-    // Check if the response is incomplete (just a model name without text content)
-    const hasIncompleteResponse = jsonResponse && 
-                                 (jsonResponse.model || jsonResponse.model_name) && 
-                                 !(jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message);
+    // Check if the response contains only model information but no text content
+    const hasModelInfoOnly = jsonResponse && 
+                             (jsonResponse.model || jsonResponse.model_name) && 
+                             !(jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message);
     
-    if (hasIncompleteResponse) {
-      console.log('Incomplete response detected for model:', model);
+    if (hasModelInfoOnly) {
+      console.log('Response contains only model information:', jsonResponse.model_name || jsonResponse.model);
     }
     
     // Provide clear information about the model used
@@ -183,8 +183,8 @@ export const generateText = async (req, res) => {
         responseText = JSON.stringify(responseText);
       }
     } else if (jsonResponse.model || jsonResponse.model_name) {
-      // Just model information without text content
-      responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
+      // Just model information without text content - the model is identifying itself
+      responseText = `I'm the ${displayModelName} model. How can I help you today?`;
     } else {
       // Completely empty response
       responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
