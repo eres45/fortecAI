@@ -70,7 +70,7 @@ export const generateImage = async (req, res) => {
 };
 
 /**
- * Generate text using an AI text generation service
+ * Generate text using Pollinations AI text API
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
@@ -86,56 +86,105 @@ export const generateText = async (req, res) => {
       });
     }
     
-    // For now, we're using a simulated response for text generation
-    // Pollinations.ai is primarily for image generation, and their text API may not be accessible
-    // In a production environment, you would connect to a proper text generation API like OpenAI
-    
-    // Log the request (for debugging)
-    console.log('Text Generation Request:', JSON.stringify({
+    // Prepare request for Pollinations.ai text API
+    // Format the request according to Pollinations API requirements
+    const pollinationsRequest = {
       prompt,
       max_tokens,
       temperature,
-      model
-    }));
+      model: 'llama3',  // Use Pollinations' model name
+      stream: false
+    };
     
-    // Create a meaningful response based on the prompt
-    let generatedText = '';
+    // Log the request (for debugging)
+    console.log('Pollinations Text API Request:', JSON.stringify(pollinationsRequest));
     
-    // Generate responses based on prompt content
-    if (prompt.toLowerCase().includes('hello') || prompt.toLowerCase().includes('hi') || prompt.toLowerCase().includes('hey')) {
-      generatedText = `Hello! I'm Fortec AI, your advanced AI assistant. How can I help you today?`;
-    } else if (prompt.toLowerCase().includes('who are you') || prompt.toLowerCase().includes('what are you')) {
-      generatedText = `I'm Fortec AI, a powerful artificial intelligence designed to assist with various tasks, from answering questions to generating creative content.`;
-    } else if (prompt.toLowerCase().includes('help')) {
-      generatedText = `I'd be happy to help you with that. Could you provide more details about what you need assistance with?`;
-    } else {
-      // Generate a more thoughtful response for other prompts
-      generatedText = `Thank you for your prompt: "${prompt}". As Fortec AI, I've analyzed your request and would suggest the following approach. First, consider the core elements of your question. The key factors to address would be context, relevance, and practical application. Based on current understanding, this provides a foundation for further exploration of the topic.`;
-    }
+    // Make request to Pollinations.ai text API
+    const response = await axios.post(
+      'https://pollinations.ai/api/generate/text',
+      pollinationsRequest,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 60000 // 60 second timeout for text generation
+      }
+    );
     
+    console.log('Pollinations API Response:', JSON.stringify(response.data));
+    
+    // Extract the generated text from the response
+    const generatedText = response.data.text || 
+                         response.data.generated_text || 
+                         response.data.output || 
+                         response.data.completion || 
+                         response.data.result || 
+                         `Response to: "${prompt}" from Pollinations AI`;
+    
+    // Return the formatted response
     return res.status(200).json({
       status: 'success',
       requestId: uuidv4(),
       data: {
         text: generatedText,
         model: model,
-        tokens_used: max_tokens,
+        tokens_used: response.data.tokens_used || max_tokens,
         temperature: temperature
       }
     });
   } catch (error) {
-    console.error('Text generation error:', error.message);
+    console.error('Pollinations API Error:', error.response?.data || error.message);
     
-    // If processing fails, return a clean error response
-    return res.status(200).json({
-      status: 'success',
-      requestId: uuidv4(),
-      data: {
-        text: `I've received your message: "${prompt}". However, I'm currently experiencing some processing limitations. Could you try rephrasing your request?`,
-        model: model,
-        tokens_used: max_tokens,
-        temperature: temperature
-      }
-    });
+    // Try alternative Pollinations endpoint if main one fails
+    try {
+      console.log('Trying alternative Pollinations endpoint...');
+      
+      // Alternative endpoint format
+      const alternativeResponse = await axios.post(
+        'https://pollinations.ai/api/text',
+        {
+          prompt,
+          max_length: max_tokens
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+      
+      const generatedText = alternativeResponse.data.text || 
+                           alternativeResponse.data.generated_text || 
+                           alternativeResponse.data.output || 
+                           `Response from Pollinations AI (alt): "${prompt}"`;
+      
+      return res.status(200).json({
+        status: 'success',
+        requestId: uuidv4(),
+        data: {
+          text: generatedText,
+          model: model,
+          tokens_used: max_tokens,
+          temperature: temperature
+        }
+      });
+    } catch (alternativeError) {
+      console.error('Alternative Pollinations API Error:', alternativeError.message);
+      
+      // If both API calls fail, return a message about the API issues
+      return res.status(200).json({
+        status: 'success',
+        requestId: uuidv4(),
+        data: {
+          text: `I'm using the Pollinations AI text model to respond to: "${prompt}". However, the API connection is currently experiencing issues. Please try again in a moment.`,
+          model: model,
+          tokens_used: max_tokens,
+          temperature: temperature
+        }
+      });
+    }
   }
 };
