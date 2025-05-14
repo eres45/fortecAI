@@ -185,15 +185,23 @@ export const generateText = async (req, res) => {
       responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
     }
     
-    // Format the response
-    const formattedResponse = responseText;
+    // Log what we're actually returning to help debug
+    console.log('Sending response to client:', responseText);
+    
+    // For message property responses, create a properly structured object
+    let formattedText;
+    if (jsonResponse.message && typeof jsonResponse.message === 'string') {
+      formattedText = jsonResponse.message;
+    } else {
+      formattedText = responseText;
+    }
     
     // Return the formatted response with all information
     return res.status(200).json({
       status: 'success',
       requestId: uuidv4(),
       data: {
-        text: formattedResponse,
+        text: formattedText,
         model: model,
         requested_model: model,
         tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
