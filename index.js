@@ -17,7 +17,11 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Apply middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow resources to be shared cross-origin
+}));
+
+// Set up CORS middleware with broader configuration for Vercel deployments
 app.use(cors({
   origin: function (origin, callback) {
     // List of allowed origins
@@ -27,22 +31,35 @@ app.use(cors({
       'https://fortecai.vercel.app', 
       'https://fortecai-40ktq3sin-eres-projects-3b5e8640.vercel.app',
       'https://fortecai-cfq16pweh-eres-projects-3b5e8640.vercel.app',
+      'https://fortecai-prm07m84k-eres-projects-3b5e8640.vercel.app',
       'http://localhost:3000',
-      'http://127.0.0.1:3000'
+      'http://127.0.0.1:3000',
+      'http://localhost:5173', // Vite development server
+      'https://fortecai-git-main-eres-projects-3b5e8640.vercel.app', // Main branch Vercel deployment
+      // Add a wildcard for other Vercel preview deployments
+      // Can match any fortecai-*-eres-projects-*.vercel.app domain
     ];
     
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
+    // Allow any Vercel deployment URL for this project
+    if (origin.includes('fortecai') && origin.includes('vercel.app')) {
+      return callback(null, origin);
+    }
+    
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
       callback(null, origin); // Reflect the request origin in the response
     } else {
+      // For development, log the rejected origin
+      console.log(`CORS blocked origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  maxAge: 86400 // 24 hours - how long the browser should cache CORS response
 }));
 app.use(express.json());
 app.use(morgan('dev'));
