@@ -103,6 +103,7 @@ export const generateText = async (req, res) => {
         temperature: temperature.toString(),
         max_tokens: max_tokens.toString()
       });
+      // Ensure model parameter is explicitly included in the URL path for Pollinations API
       requestUrl = `https://text.pollinations.ai/${encodedPrompt}?${params.toString()}`;
     }
     
@@ -147,7 +148,10 @@ export const generateText = async (req, res) => {
       jsonResponse = { text: response.data };
     }
     
-    // Return the formatted response
+    // Extract the model information to return to the client
+    console.log('Full jsonResponse:', JSON.stringify(jsonResponse));
+    
+    // Return the formatted response with all possible model information
     return res.status(200).json({
       status: 'success',
       requestId: uuidv4(),
@@ -155,7 +159,9 @@ export const generateText = async (req, res) => {
         text: jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse,
         model: model,
         tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
-        temperature: temperature
+        temperature: temperature,
+        // Include any model information from the response
+        model_name: jsonResponse.model_name || jsonResponse.model || model
       }
     });
   } catch (error) {
