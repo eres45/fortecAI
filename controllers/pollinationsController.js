@@ -180,18 +180,69 @@ export const generateText = async (req, res) => {
     // Extract the model information to return to the client
     console.log('Full jsonResponse:', JSON.stringify(jsonResponse));
     
+    // Check if the response is incomplete (just a model name without text content)
+    const hasIncompleteResponse = jsonResponse && 
+                                 (jsonResponse.model || jsonResponse.model_name) && 
+                                 !(jsonResponse.text || jsonResponse.content || jsonResponse.response);
+    
+    // If we have an incomplete response and haven't already fallen back, try OpenAI model
+    if (hasIncompleteResponse && model !== 'openai') {
+      console.log('Incomplete response detected. Trying OpenAI model...');
+      actualModel = 'openai';
+      const fallbackParams = new URLSearchParams({
+        model: 'openai',
+        json: 'true',
+        referrer: 'fortecai.vercel.app',
+        temperature: temperature.toString(),
+        max_tokens: max_tokens.toString()
+      });
+      const fallbackUrl = `https://text.pollinations.ai/${encodedPrompt}?${fallbackParams.toString()}`;
+      const fallbackResponse = await axios.get(fallbackUrl, {
+        headers: { 'Accept': 'application/json' },
+        responseType: 'json',
+        timeout: 60000
+      });
+      
+      // Process the fallback response
+      if (typeof fallbackResponse.data === 'string') {
+        jsonResponse = JSON.parse(fallbackResponse.data);
+      } else {
+        jsonResponse = fallbackResponse.data;
+      }
+      console.log('OpenAI fallback response:', JSON.stringify(jsonResponse));
+    }
+    
     // Handle fallbacks and provide clear information about the model actually used
     const wasModelFallback = originalModel !== actualModel;
     const displayModelName = jsonResponse.model_name || jsonResponse.model || actualModel;
     
-    // Return the formatted response with all possible model information
+    // Determine the actual text content to return
+    let responseText;
+    if (jsonResponse.text || jsonResponse.content || jsonResponse.response) {
+      // We have actual text content from the API
+      responseText = jsonResponse.text || jsonResponse.content || jsonResponse.response;
+    } else if (wasModelFallback) {
+      // Generate a fallback message for the response
+      responseText = `This response was generated using ${displayModelName} because the requested model (${originalModel}) didn't provide a complete response.`;
+    } else if (jsonResponse.model || jsonResponse.model_name) {
+      // Just model information without text content
+      responseText = `I'm a ${jsonResponse.model || jsonResponse.model_name} model. How can I help you today?`;
+    } else {
+      // Completely empty response
+      responseText = 'No response generated. The model may be unavailable.';
+    }
+    
+    // Format the final response
+    const formattedResponse = wasModelFallback ? 
+      { response: responseText, model_name: `${displayModelName} (fallback from ${originalModel})` } : 
+      responseText;
+    
+    // Return the formatted response with all information
     return res.status(200).json({
       status: 'success',
       requestId: uuidv4(),
       data: {
-        text: wasModelFallback 
-          ? { response: jsonResponse.text || jsonResponse.content || jsonResponse.response || 'Response generated', model_name: `${displayModelName} (fallback from ${originalModel})` }
-          : jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse,
+        text: formattedResponse,
         model: actualModel,
         requested_model: originalModel,
         tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
