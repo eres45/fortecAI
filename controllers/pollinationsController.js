@@ -177,6 +177,11 @@ export const generateText = async (req, res) => {
     if (jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message) {
       // We have actual text content from the API
       responseText = jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message;
+      // Ensure we're returning a string, not an object
+      if (typeof responseText === 'object' && responseText !== null) {
+        console.log('Converting response object to string:', responseText);
+        responseText = JSON.stringify(responseText);
+      }
     } else if (jsonResponse.model || jsonResponse.model_name) {
       // Just model information without text content
       responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
