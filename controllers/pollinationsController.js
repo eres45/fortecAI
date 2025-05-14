@@ -68,7 +68,6 @@ export const generateImage = async (req, res) => {
     return handleError(error, req, res);
   }
 };
-
 /**
  * Generate text using Pollinations AI text API
  * @param {Object} req - Express request object
@@ -76,6 +75,7 @@ export const generateImage = async (req, res) => {
  */
 export const generateText = async (req, res) => {
   try {
+    // Get parameters from request body
     const { prompt, max_tokens = 150, temperature = 0.7, model = 'fortec-lite' } = req.body;
     
     if (!prompt) {
@@ -86,86 +86,91 @@ export const generateText = async (req, res) => {
       });
     }
     
-    // Prepare request for Pollinations.ai text API
-    // Format the request according to Pollinations API requirements
-    const pollinationsRequest = {
-      prompt,
-      max_tokens,
-      temperature,
-      model: 'llama3',  // Use Pollinations' model name
-      stream: false
-    };
+    // Store prompt in this scope for error handlers to access
+    const userPrompt = prompt;
     
     // Log the request (for debugging)
-    console.log('Pollinations Text API Request:', JSON.stringify(pollinationsRequest));
+    console.log('Pollinations Text API Request:', JSON.stringify({
+      prompt: userPrompt,
+      model: model === 'fortec-lite' ? 'openai' : model, // Map our model name to Pollinations model name
+      temperature
+    }));
     
-    // Make request to Pollinations.ai text API
-    const response = await axios.post(
-      'https://pollinations.ai/api/generate/text',
-      pollinationsRequest,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        timeout: 60000 // 60 second timeout for text generation
+    // Prepare the URL with all parameters properly URL encoded
+    const encodedPrompt = encodeURIComponent(userPrompt);
+    const params = new URLSearchParams({
+      model: 'openai', // Use OpenAI model by default
+      json: 'true',    // Get JSON response
+      referrer: 'fortecai.vercel.app',
+      temperature: temperature.toString()
+    });
+    
+    // Build the URL for the GET request
+    const requestUrl = `https://text.pollinations.ai/${encodedPrompt}?${params.toString()}`;
+    
+    // Make request to Pollinations.ai text API using their documented GET endpoint
+    const response = await axios.get(requestUrl, {
+      headers: {
+        'Accept': 'application/json'
+      },
+      timeout: 30000 // 30 second timeout
+    });
+    
+    // Parse the JSON response (Pollinations returns a JSON string)
+    let jsonResponse;
+    try {
+      // If the response is a string, parse it (the API returns a JSON string)
+      if (typeof response.data === 'string') {
+        jsonResponse = JSON.parse(response.data);
+      } else {
+        jsonResponse = response.data;
       }
-    );
-    
-    console.log('Pollinations API Response:', JSON.stringify(response.data));
-    
-    // Extract the generated text from the response
-    const generatedText = response.data.text || 
-                         response.data.generated_text || 
-                         response.data.output || 
-                         response.data.completion || 
-                         response.data.result || 
-                         `Response to: "${prompt}" from Pollinations AI`;
+      console.log('Pollinations API Response parsed:', jsonResponse);
+    } catch (parseError) {
+      console.log('Response is plain text:', response.data);
+      jsonResponse = { text: response.data };
+    }
     
     // Return the formatted response
     return res.status(200).json({
       status: 'success',
       requestId: uuidv4(),
       data: {
-        text: generatedText,
+        text: jsonResponse.text || jsonResponse.content || response.data || `Response to: "${userPrompt}"`,
         model: model,
-        tokens_used: response.data.tokens_used || max_tokens,
+        tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
         temperature: temperature
       }
     });
   } catch (error) {
     console.error('Pollinations API Error:', error.response?.data || error.message);
     
+    // Save the prompt from the request body for use in error handling
+    const userPrompt = req.body.prompt || 'your query';
+    const model = req.body.model || 'fortec-lite';
+    const max_tokens = req.body.max_tokens || 150;
+    const temperature = req.body.temperature || 0.7;
+    
     // Try alternative Pollinations endpoint if main one fails
     try {
       console.log('Trying alternative Pollinations endpoint...');
       
-      // Alternative endpoint format
-      const alternativeResponse = await axios.post(
-        'https://pollinations.ai/api/text',
+      // Use URL encoding for the prompt in the URL path
+      const encodedPrompt = encodeURIComponent(userPrompt);
+      
+      // Alternative documented endpoint with simpler parameters
+      const alternativeResponse = await axios.get(
+        `https://text.pollinations.ai/${encodedPrompt}`,
         {
-          prompt,
-          max_length: max_tokens
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          timeout: 30000
+          timeout: 15000 // shorter timeout for the fallback
         }
       );
-      
-      const generatedText = alternativeResponse.data.text || 
-                           alternativeResponse.data.generated_text || 
-                           alternativeResponse.data.output || 
-                           `Response from Pollinations AI (alt): "${prompt}"`;
       
       return res.status(200).json({
         status: 'success',
         requestId: uuidv4(),
         data: {
-          text: generatedText,
+          text: alternativeResponse.data || `Response from Pollinations AI for: "${userPrompt}"`,
           model: model,
           tokens_used: max_tokens,
           temperature: temperature
@@ -174,12 +179,12 @@ export const generateText = async (req, res) => {
     } catch (alternativeError) {
       console.error('Alternative Pollinations API Error:', alternativeError.message);
       
-      // If both API calls fail, return a message about the API issues
+      // If both API calls fail, return a helpful message
       return res.status(200).json({
         status: 'success',
         requestId: uuidv4(),
         data: {
-          text: `I'm using the Pollinations AI text model to respond to: "${prompt}". However, the API connection is currently experiencing issues. Please try again in a moment.`,
+          text: `I'm Fortec AI processing your prompt: "${userPrompt}". Our connection to the Pollinations API is currently experiencing issues. This could be due to high demand or temporary service disruption. Please try again shortly.`,
           model: model,
           tokens_used: max_tokens,
           temperature: temperature
