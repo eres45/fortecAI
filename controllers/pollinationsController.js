@@ -163,7 +163,7 @@ export const generateText = async (req, res) => {
     // Check if the response is incomplete (just a model name without text content)
     const hasIncompleteResponse = jsonResponse && 
                                  (jsonResponse.model || jsonResponse.model_name) && 
-                                 !(jsonResponse.text || jsonResponse.content || jsonResponse.response);
+                                 !(jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message);
     
     if (hasIncompleteResponse) {
       console.log('Incomplete response detected for model:', model);
@@ -174,9 +174,9 @@ export const generateText = async (req, res) => {
     
     // Determine the actual text content to return
     let responseText;
-    if (jsonResponse.text || jsonResponse.content || jsonResponse.response) {
+    if (jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message) {
       // We have actual text content from the API
-      responseText = jsonResponse.text || jsonResponse.content || jsonResponse.response;
+      responseText = jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse.message;
     } else if (jsonResponse.model || jsonResponse.model_name) {
       // Just model information without text content
       responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
