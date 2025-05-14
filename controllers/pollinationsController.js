@@ -19,39 +19,24 @@ export const generateImage = async (req, res) => {
       });
     }
     
-    // Prepare request for pollinations.ai
-    const pollinationsRequest = {
-      prompt,
-      width,
-      height,
-      num_outputs,
-      model
-    };
-    
     // Log the request (for debugging)
-    console.log('Pollinations Request:', JSON.stringify(pollinationsRequest));
+    console.log('Pollinations Image API Request:', JSON.stringify({ prompt, model, width, height }));
     
-    // Make request to pollinations.ai
-    const response = await axios.post(
-      'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt),
-      {
-        params: {
-          width,
-          height,
-          seed: Math.floor(Math.random() * 10000)
-        }
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        responseType: 'json'
-      }
-    );
+    // Build the URL based on the model
+    let imageUrl;
     
-    // Simplify the response to match our API structure
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}`;
+    if (model === 'midjourney' || model === 'dalle' || model === 'playground') {
+      // For these models, include the model name in the URL
+      imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=${model}&width=${width}&height=${height}`;
+    } else {
+      // Default to stable-diffusion
+      imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}`;
+    }
+    
+    // Make a GET request to verify the image exists (optional)
+    await axios.get(imageUrl, { responseType: 'arraybuffer' }).catch(error => {
+      console.log('Image preview check failed, but this is expected. Continuing.', error.message);
+    });
     
     return res.status(200).json({
       status: 'success',
@@ -76,7 +61,7 @@ export const generateImage = async (req, res) => {
 export const generateText = async (req, res) => {
   try {
     // Get parameters from request body
-    const { prompt, max_tokens = 150, temperature = 0.7, model = 'fortec-lite' } = req.body;
+    const { prompt, max_tokens = 150, temperature = 0.7, model = 'openai', voice = '' } = req.body;
     
     if (!prompt) {
       return res.status(400).json({
@@ -92,34 +77,65 @@ export const generateText = async (req, res) => {
     // Log the request (for debugging)
     console.log('Pollinations Text API Request:', JSON.stringify({
       prompt: userPrompt,
-      model: model === 'fortec-lite' ? 'openai' : model, // Map our model name to Pollinations model name
+      model,
       temperature
     }));
     
-    // Prepare the URL with all parameters properly URL encoded
+    // Build the appropriate URL based on the model type
+    let requestUrl;
+    let isAudioRequest = false;
     const encodedPrompt = encodeURIComponent(userPrompt);
-    const params = new URLSearchParams({
-      model: 'openai', // Use OpenAI model by default
-      json: 'true',    // Get JSON response
-      referrer: 'fortecai.vercel.app',
-      temperature: temperature.toString()
-    });
     
-    // Build the URL for the GET request
-    const requestUrl = `https://text.pollinations.ai/${encodedPrompt}?${params.toString()}`;
+    if (model === 'openai-audio') {
+      // Handle audio generation requests
+      isAudioRequest = true;
+      const audioParams = new URLSearchParams({
+        model: 'openai-audio',
+        voice: voice || 'alloy' // default voice if not specified
+      });
+      requestUrl = `https://text.pollinations.ai/${encodedPrompt}?${audioParams.toString()}`;
+    } else {
+      // Handle text generation requests
+      const params = new URLSearchParams({
+        model, // Use the specified model
+        json: 'true', // Get JSON response
+        referrer: 'fortecai.vercel.app',
+        temperature: temperature.toString(),
+        max_tokens: max_tokens.toString()
+      });
+      requestUrl = `https://text.pollinations.ai/${encodedPrompt}?${params.toString()}`;
+    }
     
-    // Make request to Pollinations.ai text API using their documented GET endpoint
+    // Make request to Pollinations.ai API
     const response = await axios.get(requestUrl, {
       headers: {
-        'Accept': 'application/json'
+        'Accept': isAudioRequest ? 'audio/mpeg' : 'application/json'
       },
-      timeout: 30000 // 30 second timeout
+      responseType: isAudioRequest ? 'arraybuffer' : 'json',
+      timeout: 60000 // 60 second timeout
     });
     
-    // Parse the JSON response (Pollinations returns a JSON string)
+    // Handle audio response
+    if (isAudioRequest) {
+      // For audio, we'd typically return a URL to the audio file or a base64 encoding
+      // Since we can't easily store files here, we'll return the raw base64 data
+      const audioBase64 = Buffer.from(response.data).toString('base64');
+      return res.status(200).json({
+        status: 'success',
+        requestId: uuidv4(),
+        data: {
+          text: { response: 'Audio generated successfully', model: 'openai-audio' },
+          audio_data: `data:audio/mpeg;base64,${audioBase64}`,
+          model: 'openai-audio',
+          voice: voice || 'alloy'
+        }
+      });
+    }
+    
+    // Parse the JSON response for text generation
     let jsonResponse;
     try {
-      // If the response is a string, parse it (the API returns a JSON string)
+      // If the response is a string, parse it
       if (typeof response.data === 'string') {
         jsonResponse = JSON.parse(response.data);
       } else {
@@ -136,7 +152,7 @@ export const generateText = async (req, res) => {
       status: 'success',
       requestId: uuidv4(),
       data: {
-        text: jsonResponse.text || jsonResponse.content || response.data || `Response to: "${userPrompt}"`,
+        text: jsonResponse.text || jsonResponse.content || jsonResponse.response || jsonResponse,
         model: model,
         tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
         temperature: temperature

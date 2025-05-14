@@ -14,52 +14,42 @@ dotenv.config();
 
 // Initialize express app
 const app = express();
+
+// Trust proxy - required when running behind a reverse proxy like Render
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
-// Apply middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow resources to be shared cross-origin
+// Apply middleware - disable Helmet's default security for now to resolve CORS issues
+app.use(helmet.contentSecurityPolicy({
+  directives: {
+    defaultSrc: ["'self'", '*.fortecai.vercel.app', '*.onrender.com'],
+    connectSrc: ["'self'", '*'],
+    imgSrc: ["'self'", '*'],
+    scriptSrc: ["'self'", "'unsafe-inline'"],
+    styleSrc: ["'self'", "'unsafe-inline'"],
+  },
 }));
 
-// Set up CORS middleware with broader configuration for Vercel deployments
+// Add raw CORS headers to every response for simplicity
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
+// Also keep standard CORS middleware as backup
 app.use(cors({
-  origin: function (origin, callback) {
-    // List of allowed origins
-    const allowedOrigins = [
-      'https://fortecai.com', 
-      'https://www.fortecai.com', 
-      'https://fortecai.vercel.app', 
-      'https://fortecai-40ktq3sin-eres-projects-3b5e8640.vercel.app',
-      'https://fortecai-cfq16pweh-eres-projects-3b5e8640.vercel.app',
-      'https://fortecai-prm07m84k-eres-projects-3b5e8640.vercel.app',
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      'http://localhost:5173', // Vite development server
-      'https://fortecai-git-main-eres-projects-3b5e8640.vercel.app', // Main branch Vercel deployment
-      // Add a wildcard for other Vercel preview deployments
-      // Can match any fortecai-*-eres-projects-*.vercel.app domain
-    ];
-    
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    // Allow any Vercel deployment URL for this project
-    if (origin.includes('fortecai') && origin.includes('vercel.app')) {
-      return callback(null, origin);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
-      callback(null, origin); // Reflect the request origin in the response
-    } else {
-      // For development, log the rejected origin
-      console.log(`CORS blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: '*', // Allow all origins for now to troubleshoot
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true,
-  maxAge: 86400 // 24 hours - how long the browser should cache CORS response
+  credentials: false // Set to false to avoid the withCredentials requirement
 }));
 app.use(express.json());
 app.use(morgan('dev'));
