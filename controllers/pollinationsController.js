@@ -122,27 +122,7 @@ export const generateText = async (req, res) => {
       });
     } catch (apiError) {
       console.log('Pollinations API Error:', apiError.response?.data || apiError.message);
-      
-      if (model !== 'openai') {
-        console.log('Trying alternative Pollinations endpoint...');
-        // Fall back to OpenAI model if the specified model fails
-        actualModel = 'openai';
-        const fallbackParams = new URLSearchParams({
-          model: 'openai',
-          json: 'true',
-          referrer: 'fortecai.vercel.app',
-          temperature: temperature.toString(),
-          max_tokens: max_tokens.toString()
-        });
-        const fallbackUrl = `https://text.pollinations.ai/${encodedPrompt}?${fallbackParams.toString()}`;
-        response = await axios.get(fallbackUrl, {
-          headers: { 'Accept': 'application/json' },
-          responseType: 'json',
-          timeout: 60000
-        });
-      } else {
-        throw apiError; // Re-throw if already using openai and still failing
-      }
+      throw new Error(`The ${model} model is not available currently. Please try again later or choose a different model.`);
     }
     
     // Handle audio response
@@ -185,57 +165,28 @@ export const generateText = async (req, res) => {
                                  (jsonResponse.model || jsonResponse.model_name) && 
                                  !(jsonResponse.text || jsonResponse.content || jsonResponse.response);
     
-    // If we have an incomplete response and haven't already fallen back, try OpenAI model
-    if (hasIncompleteResponse && model !== 'openai') {
-      console.log('Incomplete response detected. Trying OpenAI model...');
-      actualModel = 'openai';
-      const fallbackParams = new URLSearchParams({
-        model: 'openai',
-        json: 'true',
-        referrer: 'fortecai.vercel.app',
-        temperature: temperature.toString(),
-        max_tokens: max_tokens.toString()
-      });
-      const fallbackUrl = `https://text.pollinations.ai/${encodedPrompt}?${fallbackParams.toString()}`;
-      const fallbackResponse = await axios.get(fallbackUrl, {
-        headers: { 'Accept': 'application/json' },
-        responseType: 'json',
-        timeout: 60000
-      });
-      
-      // Process the fallback response
-      if (typeof fallbackResponse.data === 'string') {
-        jsonResponse = JSON.parse(fallbackResponse.data);
-      } else {
-        jsonResponse = fallbackResponse.data;
-      }
-      console.log('OpenAI fallback response:', JSON.stringify(jsonResponse));
+    if (hasIncompleteResponse) {
+      console.log('Incomplete response detected for model:', model);
     }
     
-    // Handle fallbacks and provide clear information about the model actually used
-    const wasModelFallback = originalModel !== actualModel;
-    const displayModelName = jsonResponse.model_name || jsonResponse.model || actualModel;
+    // Provide clear information about the model used
+    const displayModelName = jsonResponse.model_name || jsonResponse.model || model;
     
     // Determine the actual text content to return
     let responseText;
     if (jsonResponse.text || jsonResponse.content || jsonResponse.response) {
       // We have actual text content from the API
       responseText = jsonResponse.text || jsonResponse.content || jsonResponse.response;
-    } else if (wasModelFallback) {
-      // Generate a fallback message for the response
-      responseText = `This response was generated using ${displayModelName} because the requested model (${originalModel}) didn't provide a complete response.`;
     } else if (jsonResponse.model || jsonResponse.model_name) {
       // Just model information without text content
-      responseText = `I'm a ${jsonResponse.model || jsonResponse.model_name} model. How can I help you today?`;
+      responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
     } else {
       // Completely empty response
-      responseText = 'No response generated. The model may be unavailable.';
+      responseText = `The ${displayModelName} model is not available currently. Please try again later or choose a different model.`;
     }
     
-    // Format the final response
-    const formattedResponse = wasModelFallback ? 
-      { response: responseText, model_name: `${displayModelName} (fallback from ${originalModel})` } : 
-      responseText;
+    // Format the response
+    const formattedResponse = responseText;
     
     // Return the formatted response with all information
     return res.status(200).json({
@@ -243,62 +194,29 @@ export const generateText = async (req, res) => {
       requestId: uuidv4(),
       data: {
         text: formattedResponse,
-        model: actualModel,
-        requested_model: originalModel,
+        model: model,
+        requested_model: model,
         tokens_used: jsonResponse.usage?.total_tokens || max_tokens,
         temperature: temperature,
         // Include any model information from the response
-        model_name: wasModelFallback ? `${displayModelName} (fallback from ${originalModel})` : (displayModelName)
+        model_name: displayModelName
       }
     });
   } catch (error) {
     console.error('Pollinations API Error:', error.response?.data || error.message);
     
-    // Save the prompt from the request body for use in error handling
-    const userPrompt = req.body.prompt || 'your query';
+    // Get parameters from request body for error handling
     const model = req.body.model || 'fortec-lite';
-    const max_tokens = req.body.max_tokens || 150;
-    const temperature = req.body.temperature || 0.7;
     
-    // Try alternative Pollinations endpoint if main one fails
-    try {
-      console.log('Trying alternative Pollinations endpoint...');
-      
-      // Use URL encoding for the prompt in the URL path
-      const encodedPrompt = encodeURIComponent(userPrompt);
-      
-      // Alternative documented endpoint with simpler parameters
-      const alternativeResponse = await axios.get(
-        `https://text.pollinations.ai/${encodedPrompt}`,
-        {
-          timeout: 15000 // shorter timeout for the fallback
-        }
-      );
-      
-      return res.status(200).json({
-        status: 'success',
-        requestId: uuidv4(),
-        data: {
-          text: alternativeResponse.data || `Response from Pollinations AI for: "${userPrompt}"`,
-          model: model,
-          tokens_used: max_tokens,
-          temperature: temperature
-        }
-      });
-    } catch (alternativeError) {
-      console.error('Alternative Pollinations API Error:', alternativeError.message);
-      
-      // If both API calls fail, return a helpful message
-      return res.status(200).json({
-        status: 'success',
-        requestId: uuidv4(),
-        data: {
-          text: `I'm Fortec AI processing your prompt: "${userPrompt}". Our connection to the Pollinations API is currently experiencing issues. This could be due to high demand or temporary service disruption. Please try again shortly.`,
-          model: model,
-          tokens_used: max_tokens,
-          temperature: temperature
-        }
-      });
-    }
+    // Return error message that model is not available
+    return res.status(200).json({
+      status: 'error',
+      requestId: uuidv4(),
+      data: {
+        text: `The ${model} model is not available currently. Please try again later or choose a different model.`,
+        model: model,
+        model_name: model
+      }
+    });
   }
 };
